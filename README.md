@@ -152,3 +152,7 @@ The tests exercise the real MCP stdio client against a fake blackboard-mcp serve
 
 - Whether to remove past-due synced events after some period. Today they are left alone.
 - The right refresh interval. 30 minutes is the default; change it with `install-xbar --interval`.
+
+## Contributors
+
+- [Joshua Persaud](https://github.com/Jopersaud)
