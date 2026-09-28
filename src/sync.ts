@@ -11,6 +11,7 @@ import { BlackboardClient } from './blackboard/client.js';
 import { GoogleCalendar } from './calendar/client.js';
 import { ConfigError, loadConfig, systemTimeZone, type Config } from './config.js';
 import { SyncError, errorMessage, type ErrorKind } from './errors.js';
+import { addDays, type CalendarEvent } from './events.js';
 import { acquireLock } from './lock.js';
 import { logLine } from './log.js';
 import { notify } from './notify.js';
@@ -40,15 +41,54 @@ const NOTIFICATIONS: Partial<Record<ErrorKind, [string, string]>> = {
   google_auth: ['Google Calendar access lost', 'Calendar sync is paused. Run `npm run auth` in blackboard-calendar-sync.'],
 };
 
-function printDryRun(result: SyncResult): void {
-  say(`Dry run — nothing was sent to Google Calendar.\n`);
+const fmt = (timeZone: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone, ...opts });
+
+/** "Sun, Sep 27" for a YYYY-MM-DD calendar date. */
+function formatDate(date: string): string {
+  return fmt('UTC', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${date}T12:00:00Z`));
+}
+
+/** "5:00 PM" for minutes after midnight. */
+function formatClock(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** When a due event's popup fires, in local time. */
+function describePopup(event: CalendarEvent, timeZone: string): string {
+  if (event.reminders.useDefault) return 'calendar default';
+  const minutes = event.reminders.overrides[0]?.minutes ?? 0;
+  if ('date' in event.start) {
+    // All-day: counted back from local midnight at the start of the day.
+    const days = Math.ceil(minutes / 1440);
+    return `${formatDate(addDays(event.start.date, -days))}, ${formatClock(days * 1440 - minutes)}`;
+  }
+  const at = new Date(Date.parse(event.start.dateTime) - minutes * 60_000);
+  return fmt(timeZone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
+}
+
+function printDryRun(result: SyncResult, timeZone: string): void {
+  const time = fmt(timeZone, { hour: 'numeric', minute: '2-digit' });
+  const day = fmt(timeZone, { weekday: 'short', month: 'short', day: 'numeric' });
+  const zone = fmt(timeZone, { timeZoneName: 'short' });
+  say(`Dry run — nothing was sent to Google Calendar. Times are ${timeZone}.\n`);
   for (const o of result.outcomes) {
     const { due, reminder } = o.events;
-    const when = 'date' in due.start ? `all-day ${due.start.date}` : `${due.start.dateTime} → ${'dateTime' in due.end ? due.end.dateTime : ''}`;
-    const popup = due.reminders.useDefault ? 'default' : `${due.reminders.overrides[0]?.minutes} min`;
+    const course = [o.assignment.courseCode, o.assignment.courseName].filter(Boolean).join(' · ');
+    let when: string;
+    if ('date' in due.start) {
+      when = `all-day ${formatDate(due.start.date)}`;
+    } else {
+      const start = new Date(due.start.dateTime);
+      const end = new Date('dateTime' in due.end ? due.end.dateTime : due.start.dateTime);
+      const tz = zone.formatToParts(end).find((p) => p.type === 'timeZoneName')?.value ?? '';
+      when = `${day.format(start)}, ${time.format(start)} – ${time.format(end)} ${tz}`;
+    }
     say(`[${o.action}] ${due.summary}`);
-    say(`    due event:      ${when} (popup ${popup} before start)`);
-    say(`    reminder event: all-day ${'date' in reminder.start ? reminder.start.date : ''} — "${reminder.summary}"`);
+    if (course) say(`    class:          ${course}`);
+    say(`    due event:      ${when} (popup ${describePopup(due, timeZone)})`);
+    say(`    reminder event: all-day ${'date' in reminder.start ? formatDate(reminder.start.date) : ''} — "${reminder.summary}"`);
   }
   say(`\n${result.created} to create, ${result.updated} to update, ${result.unchanged} unchanged.`);
 }
@@ -145,7 +185,7 @@ async function main(): Promise<number> {
     for (const w of result.warnings) logLine(`NOTE ${w}`);
     logLine(`Sync finished: ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ${result.failed} failed`);
     if (dryRun) {
-      printDryRun(result);
+      printDryRun(result, (config ?? loadConfig()).timeZone);
       return 0;
     }
     const status = successStatus(result, new Date());
