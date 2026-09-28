@@ -38,6 +38,10 @@ describe('renderXbar', () => {
     expect(body).toContain('Last synced: 2 minutes ago');
     expect(body).toContain('5 assignments tracked, 1 updated this run');
     expect(body).toContain('Sync now | refresh=true');
+    const withAction = split(renderXbar(ok, { ...ctx, syncScript: '/p/dist/sync.js', pluginName: 'blackboard-sync.3h.sh' })).body;
+    expect(withAction).toContain(
+      'Sync now | bash=/opt/homebrew/bin/node param1=/p/dist/sync.js param2=--spawn param3=--plugin param4=blackboard-sync.3h.sh terminal=false refresh=true',
+    );
     expect(body).toContain('View log | bash=/usr/bin/open param1=/Users/me/.blackboard-calendar-sync/log.txt terminal=false');
   });
 
@@ -68,8 +72,16 @@ describe('renderXbar', () => {
 
   it('shows in-progress and never-synced states', () => {
     expect(split(renderXbar(undefined, { ...ctx, inProgress: true })).header).toEqual(['🎓 syncing…']);
-    expect(renderXbar(ok, { ...ctx, inProgress: true })).toContain('Sync in progress…');
+    expect(renderXbar(ok, { ...ctx, inProgress: true })).toContain('Syncing… | color=gray');
     expect(split(renderXbar(undefined, ctx)).header).toEqual(['🎓 not synced yet']);
+  });
+
+  it('shows offline as a quiet note, keeping the normal count', () => {
+    const status: Status = { ...ok, error: { kind: 'offline', message: 'No internet', since: ok.lastRunAt } };
+    const { header, body } = split(renderXbar(status, ctx));
+    expect(header).toEqual(['🎓 2 due']);
+    expect(body).toContain("Offline — will sync when you're back online | color=gray");
+    expect(body.join('\n')).not.toContain('color=red');
   });
 
   it('lists partial failures in a submenu', () => {
@@ -102,6 +114,6 @@ describe('helpers', () => {
   it('pluginScript is a thin launcher with safely quoted paths', () => {
     const s = pluginScript({ projectDir: "/Users/me/it's here", nodePath: '/opt/homebrew/bin/node' });
     expect(s.startsWith('#!/bin/bash\n')).toBe(true);
-    expect(s).toContain(`cd '/Users/me/it'\\''s here' && exec '/opt/homebrew/bin/node' dist/sync.js --xbar-output`);
+    expect(s).toContain(`cd '/Users/me/it'\\''s here' && exec '/opt/homebrew/bin/node' dist/sync.js --xbar-output --plugin "$(basename "$0")"`);
   });
 });

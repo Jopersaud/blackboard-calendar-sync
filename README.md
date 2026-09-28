@@ -91,6 +91,13 @@ This writes `blackboard-sync.30m.sh` (a two-line launcher) into xbar's plugin fo
 menu bar then shows `🎓 3 due` (items due in the next 7 days). The dropdown has the last
 sync time, upcoming items, **Sync now**, **Open Google Calendar** and **View log**.
 
+The menu bar never waits on Blackboard: each refresh prints the last saved results
+instantly and, when a sync is due, starts one in the background. When it finishes, xbar
+refreshes to show the new results. Syncs are sleep-safe: a run frozen by closing the lid is
+detected on wake and replaced with a fresh one, and a sync waits up to 90 seconds for the
+network to come back instead of hanging. Re-run `npm run install-xbar` after updating so the
+plugin passes its own name along (`--plugin`) for these refreshes.
+
 ## When something breaks
 
 | Menu bar | Cause | Fix |
@@ -99,6 +106,7 @@ sync time, upcoming items, **Sync now**, **Open Google Calendar** and **View log
 | `⚠️ Google Calendar access needed` (red) | Refresh token revoked/expired | `npm run auth`, or click **Authorize Google Calendar now…** |
 | `⚠️ Calendar sync not set up` (red) | Missing/invalid `config.json` | See Setup |
 | `🎓 3 due ⚠️` (orange) | Some other failure; last good data still shown | See **View log** |
+| `🎓 3 due` + "Offline" in the dropdown | No network at the last sync | Nothing; it syncs again once you're online |
 
 The two auth failures also fire a macOS notification, once per new occurrence (not every
 30 minutes). If one assignment fails to sync, the rest still do; the failure is listed in

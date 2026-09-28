@@ -29,6 +29,8 @@ export const ConfigSchema = z.object({
   dueEventLeadMinutes: z.number().int().min(1).max(24 * 60).default(30),
   /** IANA time zone for all date logic. Defaults to the system time zone. */
   timeZone: z.string().min(1).optional(),
+  /** Host looked up to decide whether the network is up before syncing. */
+  networkCheckHost: z.string().min(1).default('www.googleapis.com'),
   /** Also sync work due in the last few days that hasn't been handed in. */
   includeRecentlyOverdue: z.boolean().default(true),
 });

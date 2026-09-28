@@ -3,31 +3,54 @@
  * The app's single entry point.
  *
  *   node dist/sync.js                 sync once, print a summary
- *   node dist/sync.js --xbar-output   sync once, print status in xbar's format
  *   node dist/sync.js --dry-run       show what would change; no Calendar API calls
+ *   node dist/sync.js --xbar-output   print menu bar status instantly (xbar calls this);
+ *                                     starts a background sync when one is due
+ *   node dist/sync.js --spawn         start a background sync now ("Sync now")
+ *   node dist/sync.js --background    the background sync itself: silent, then refreshes xbar
  */
-import { blackboardLoginScript, distScript, hasFlag } from './app.js';
+import { blackboardLoginScript, distScript, flagValue, hasFlag } from './app.js';
+import { refreshXbar, startBackgroundSync } from './background.js';
 import { BlackboardClient } from './blackboard/client.js';
 import { GoogleCalendar } from './calendar/client.js';
 import { ConfigError, loadConfig, systemTimeZone, type Config } from './config.js';
 import { SyncError, errorMessage, type ErrorKind } from './errors.js';
 import { addDays, type CalendarEvent } from './events.js';
-import { acquireLock } from './lock.js';
+import { acquireLock, activeLock } from './lock.js';
 import { logLine } from './log.js';
 import { notify } from './notify.js';
 import { ensureAppDir, paths } from './paths.js';
 import { loadState, saveState } from './state.js';
-import { loadStatus, saveStatus, shouldNotify, type Status } from './status.js';
+import { waitForNetwork } from './network.js';
+import { errorStatus, loadStatus, saveStatus, shouldNotify, shouldStartSync, successStatus } from './status.js';
 import { runSync, type SyncResult } from './sync.engine.js';
 import { renderXbar } from './xbar.js';
 
 const args = process.argv.slice(2);
 const xbar = hasFlag(args, '--xbar-output');
 const dryRun = hasFlag(args, '--dry-run');
+const spawnOnly = hasFlag(args, '--spawn');
+const background = hasFlag(args, '--background');
 const verbose = hasFlag(args, '--verbose', '-v');
+const pluginName = flagValue(args, '--plugin');
+
+/** A background run, frozen by sleep and resumed, shows up as a gap this long between ticks. */
+const WATCHDOG_TICK_MS = 10_000;
+const SLEEP_GAP_MS = 60_000;
+/** Hard cap on one background run, so a hang can never hold the lock for long. */
+const MAX_RUN_MS = 6 * 60_000;
+
+/** The live blackboard-mcp connection, so the watchdog can shut it down (and its Chrome) before exiting. */
+let activeBlackboard: BlackboardClient | undefined;
+
+/** Exit after closing blackboard-mcp; a bare process.exit() would orphan it. */
+async function closeAndExit(code: number): Promise<never> {
+  await activeBlackboard?.close();
+  process.exit(code);
+}
 
 const say = (line: string): void => {
-  if (!xbar) process.stdout.write(`${line}\n`);
+  if (!xbar && !background) process.stdout.write(`${line}\n`);
 };
 
 function classify(err: unknown): ErrorKind {
@@ -93,48 +116,18 @@ function printDryRun(result: SyncResult, timeZone: string): void {
   say(`\n${result.created} to create, ${result.updated} to update, ${result.unchanged} unchanged.`);
 }
 
-function successStatus(result: SyncResult, now: Date): Status {
-  const status: Status = {
-    lastRunAt: now.toISOString(),
-    lastSuccessAt: now.toISOString(),
-    counts: {
-      tracked: result.outcomes.length,
-      created: result.created,
-      updated: result.updated,
-      unchanged: result.unchanged,
-      failed: result.failed,
-    },
-    failures: result.outcomes
-      .filter((o) => o.error)
-      .map((o) => ({ title: o.events.due.summary, error: o.error ?? '' })),
-    upcoming: result.outcomes.map((o) => ({
-      title: o.events.due.summary,
-      dueAt: o.assignment.dueAt,
-      allDay: o.events.allDay,
-    })),
-  };
-  if (result.calendarId) status.calendarId = result.calendarId;
-  return status;
-}
-
-function errorStatus(previous: Status | undefined, kind: ErrorKind, message: string, now: Date): Status {
-  const since = previous?.error?.kind === kind ? previous.error.since : now.toISOString();
-  return {
-    ...(previous ?? { failures: [], upcoming: [] }),
-    lastRunAt: now.toISOString(),
-    error: { kind, message, since },
-  };
-}
-
 async function sync(config: Config): Promise<SyncResult> {
   const { state, warning } = loadState();
   if (warning) logLine(`WARN ${warning}`);
   const calendar = dryRun ? undefined : GoogleCalendar.fromStoredToken();
+  // Right after wake the network may not be back yet; wait rather than hang.
+  await waitForNetwork({ host: config.networkCheckHost });
   const blackboard = await BlackboardClient.connect({
     serverPath: config.blackboardMcpPath,
     ...(config.nodePath ? { nodePath: config.nodePath } : {}),
     stderr: verbose ? 'inherit' : 'ignore',
   });
+  activeBlackboard = blackboard;
   try {
     return await runSync({
       config,
@@ -150,7 +143,25 @@ async function sync(config: Config): Promise<SyncResult> {
     // Save even after a partial run so what did sync isn't re-sent.
     if (!dryRun) saveState(state);
     await blackboard.close();
+    activeBlackboard = undefined;
   }
+}
+
+/**
+ * Watch a background run by the wall clock. Node's timers pause while the Mac
+ * sleeps, so a long gap between ticks means this run was frozen mid-sync; its
+ * Blackboard/Chrome connection is almost certainly dead by then.
+ */
+function startWatchdog(handlers: { onSleep: () => void; onTimeout: () => void }): () => void {
+  const started = Date.now();
+  let last = started;
+  const timer = setInterval(() => {
+    const now = Date.now();
+    if (now - last > SLEEP_GAP_MS) handlers.onSleep();
+    else if (now - started > MAX_RUN_MS) handlers.onTimeout();
+    last = now;
+  }, WATCHDOG_TICK_MS);
+  return () => clearInterval(timer);
 }
 
 async function main(): Promise<number> {
@@ -161,26 +172,73 @@ async function main(): Promise<number> {
   } catch {
     /* reported below, inside the normal error path */
   }
-  const ctx = () => ({
-    now: new Date(),
-    timeZone: config?.timeZone ?? systemTimeZone(),
-    logPath: paths.log,
-    nodePath: process.execPath,
-    authScript: distScript('auth.js'),
-    ...(blackboardLoginScript(config) ? { blackboardLoginScript: blackboardLoginScript(config) } : {}),
-  });
 
+  if (xbar) return showMenuBar(config);
+  if (spawnOnly) {
+    startBackgroundSync(pluginName ? { pluginName } : {});
+    return 0;
+  }
+  return runOnce(config);
+}
+
+/**
+ * What xbar calls. Prints the last saved results immediately — the menu bar
+ * is never left blank waiting on Blackboard — and starts a background sync
+ * when one is due and none is running.
+ */
+function showMenuBar(config: Config | undefined): number {
+  const status = loadStatus();
+  const now = new Date();
+  let running = activeLock() !== undefined;
+  if (!running && shouldStartSync(status, now)) {
+    startBackgroundSync(pluginName ? { pluginName } : {});
+    running = true;
+  }
+  process.stdout.write(
+    renderXbar(status, {
+      now,
+      timeZone: config?.timeZone ?? systemTimeZone(),
+      inProgress: running,
+      logPath: paths.log,
+      nodePath: process.execPath,
+      authScript: distScript('auth.js'),
+      syncScript: distScript('sync.js'),
+      ...(pluginName ? { pluginName } : {}),
+      ...(blackboardLoginScript(config) ? { blackboardLoginScript: blackboardLoginScript(config) } : {}),
+    }),
+  );
+  return 0;
+}
+
+/** One sync, in the foreground (npm run sync / dry-run) or as the silent background run. */
+async function runOnce(config: Config | undefined): Promise<number> {
   const lock = acquireLock();
   if (!lock) {
-    if (xbar) process.stdout.write(renderXbar(loadStatus(), { ...ctx(), inProgress: true }));
-    else say('A sync is already in progress; skipping.');
+    say('A sync is already in progress; skipping.');
     return 0;
   }
 
   const previous = loadStatus();
   const started = new Date();
+  const stopWatchdog = background
+    ? startWatchdog({
+        onSleep: () => {
+          logLine('Sync was interrupted by sleep; starting a fresh one');
+          lock.release();
+          startBackgroundSync(pluginName ? { pluginName } : {});
+          void closeAndExit(0);
+        },
+        onTimeout: () => {
+          logLine(`ERROR [other] Sync timed out after ${MAX_RUN_MS / 60_000} minutes`);
+          saveStatus(errorStatus(previous, 'other', 'Sync timed out; will retry at the next refresh.', new Date()));
+          lock.release();
+          void refreshXbar(pluginName).finally(() => closeAndExit(1));
+        },
+      })
+    : () => undefined;
+
   try {
-    logLine(`Sync started${dryRun ? ' (dry run)' : ''}`);
+    logLine(`Sync started${dryRun ? ' (dry run)' : background ? ' (background)' : ''}`);
     const result = await sync(config ?? loadConfig());
     for (const w of result.warnings) logLine(`NOTE ${w}`);
     logLine(`Sync finished: ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ${result.failed} failed`);
@@ -190,11 +248,8 @@ async function main(): Promise<number> {
     }
     const status = successStatus(result, new Date());
     saveStatus(status);
-    if (xbar) process.stdout.write(renderXbar(status, ctx()));
-    else {
-      say(`Synced ${result.outcomes.length} assignment(s): ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ${result.failed} failed.`);
-      for (const f of status.failures) say(`  failed: ${f.title}: ${f.error}`);
-    }
+    say(`Synced ${result.outcomes.length} assignment(s): ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ${result.failed} failed.`);
+    for (const f of status.failures) say(`  failed: ${f.title}: ${f.error}`);
     return result.failed > 0 ? 1 : 0;
   } catch (err) {
     const kind = classify(err);
@@ -204,20 +259,18 @@ async function main(): Promise<number> {
       process.stderr.write(`Dry run failed [${kind}]: ${message}\n`);
       return 1;
     }
-    const status = errorStatus(previous, kind, message, started);
-    saveStatus(status);
+    saveStatus(errorStatus(previous, kind, message, started));
     if (shouldNotify(previous, kind)) {
       const [title, body] = NOTIFICATIONS[kind] ?? ['Blackboard sync failed', message];
       await notify(title, body);
     }
-    if (xbar) {
-      process.stdout.write(renderXbar(status, ctx()));
-      return 0;
-    }
-    process.stderr.write(`Sync failed [${kind}]: ${message}\n`);
+    if (!background) process.stderr.write(`Sync failed [${kind}]: ${message}\n`);
     return 1;
   } finally {
+    stopWatchdog();
     lock.release();
+    // Show the new results right away instead of at the next interval.
+    if (background && !dryRun) await refreshXbar(pluginName);
   }
 }
 

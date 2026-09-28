@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import { ensureAppDir, paths } from './paths.js';
 
-/** A lock older than this is treated as stale even if its pid is alive (pid reuse). */
-const STALE_AFTER_MS = 30 * 60_000;
+/**
+ * A lock older than this is treated as stale even if its pid is alive: a run
+ * frozen by sleep, or pid reuse. Longer than the sync watchdog's hard limit.
+ */
+export const STALE_AFTER_MS = 10 * 60_000;
 
 export interface LockInfo {
   pid: number;
@@ -30,6 +33,13 @@ function readLock(file: string): LockInfo | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The holder of a live, recent lock, if any: i.e. a sync is running right now. */
+export function activeLock(file = paths.lock, now = Date.now()): LockInfo | undefined {
+  const holder = readLock(file);
+  if (!holder || !isAlive(holder.pid)) return undefined;
+  return now - Date.parse(holder.startedAt) < STALE_AFTER_MS ? holder : undefined;
 }
 
 /**

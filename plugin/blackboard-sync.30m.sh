@@ -6,4 +6,4 @@
 # <xbar.title>Blackboard → Google Calendar sync</xbar.title>
 # <xbar.dependencies>node</xbar.dependencies>
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
-cd "/path/to/blackboard-calendar-sync" && exec node dist/sync.js --xbar-output
+cd "/path/to/blackboard-calendar-sync" && exec node dist/sync.js --xbar-output --plugin "$(basename "$0")"

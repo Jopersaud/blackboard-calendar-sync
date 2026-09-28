@@ -1,5 +1,6 @@
 // A stand-in for blackboard-mcp's dist/index.js: same tool names and
-// result conventions, canned data. FAKE_BB_MODE=expired simulates a lapsed session.
+// result conventions, canned data. FAKE_BB_MODE=expired simulates a lapsed session;
+// FAKE_BB_MODE=slow makes get_upcoming_work take 2 minutes (a hung Blackboard).
 import fs from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -13,6 +14,7 @@ const fail = { content: [{ type: 'text', text: 'BLACKBOARD_SESSION_EXPIRED: The 
 
 server.registerTool('get_upcoming_work', { inputSchema: { days: z.number().optional() } }, async ({ days }) => {
   if (expired) return fail;
+  if (process.env.FAKE_BB_MODE === 'slow') await new Promise((r) => setTimeout(r, 120_000));
   const data = JSON.parse(read('upcoming-work.json'));
   data.window.days = days;
   return { content: [{ type: 'text', text: JSON.stringify(data) }] };

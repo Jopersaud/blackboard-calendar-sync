@@ -3,7 +3,7 @@
  * ones that silently stop syncing forever if nobody notices, so they get a
  * red menu bar state and one OS notification per new occurrence.
  */
-export type ErrorKind = 'blackboard_auth' | 'google_auth' | 'config' | 'other';
+export type ErrorKind = 'blackboard_auth' | 'google_auth' | 'config' | 'offline' | 'other';
 
 export class SyncError extends Error {
   readonly kind: ErrorKind;

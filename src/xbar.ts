@@ -18,6 +18,10 @@ export interface XbarContext {
   blackboardLoginScript?: string;
   /** This app's dist/auth.js. */
   authScript: string;
+  /** This app's dist/sync.js, for the "Sync now" action. */
+  syncScript?: string;
+  /** The plugin's own filename (e.g. "blackboard-sync.30m.sh"), so a finished sync can refresh just it. */
+  pluginName?: string;
   /** How many days ahead the menu bar count covers. */
   countDays?: number;
 }
@@ -54,6 +58,13 @@ function formatDue(dueAt: string, allDay: boolean, timeZone: string): string {
   return `${date} ${time}`;
 }
 
+/** "Sync now" starts a background sync and refreshes, so the menu never blocks on it. */
+function syncNowLine(ctx: XbarContext): string {
+  if (!ctx.syncScript) return 'Sync now | refresh=true';
+  const extra = ctx.pluginName ? ` param3=--plugin param4=${param(ctx.pluginName)}` : '';
+  return `Sync now | bash=${param(ctx.nodePath)} param1=${param(ctx.syncScript)} param2=--spawn${extra} terminal=false refresh=true`;
+}
+
 function runAction(ctx: XbarContext, script: string): string {
   return `bash=${param(ctx.nodePath)} param1=${param(script)} terminal=true refresh=true`;
 }
@@ -65,7 +76,9 @@ export function renderXbar(status: Status | undefined, ctx: XbarContext): string
   const horizon = ctx.now.getTime() + countDays * 86_400_000;
   const upcoming = (status?.upcoming ?? []).filter((u) => Date.parse(u.dueAt) >= ctx.now.getTime());
   const dueSoon = upcoming.filter((u) => Date.parse(u.dueAt) <= horizon).length;
-  const error = status?.error;
+  // Offline is transient and shown as a quiet note, not an error state.
+  const offline = status?.error?.kind === 'offline';
+  const error = offline ? undefined : status?.error;
 
   if (error?.kind === 'blackboard_auth') {
     header.push('⚠️ Blackboard login expired | color=red');
@@ -81,7 +94,8 @@ export function renderXbar(status: Status | undefined, ctx: XbarContext): string
     header.push(`🎓 ${dueSoon} due`);
   }
 
-  if (ctx.inProgress) body.push('Sync in progress… | color=gray');
+  if (ctx.inProgress) body.push('Syncing… | color=gray');
+  if (offline && !ctx.inProgress) body.push("Offline — will sync when you're back online | color=gray");
 
   if (error) {
     body.push(`${sanitize(error.message).slice(0, 160)} | color=red`);
@@ -126,7 +140,7 @@ export function renderXbar(status: Status | undefined, ctx: XbarContext): string
 
   body.push(
     '---',
-    'Sync now | refresh=true',
+    syncNowLine(ctx),
     `Open Google Calendar | href=${CALENDAR_URL}`,
     `View log | bash=/usr/bin/open param1=${param(ctx.logPath)} terminal=false`,
   );
@@ -144,7 +158,8 @@ export function pluginScript(opts: { projectDir: string; nodePath: string }): st
     '# <xbar.desc>Mirrors Blackboard due dates into Google Calendar.</xbar.desc>',
     '# <xbar.dependencies>node</xbar.dependencies>',
     'export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"',
-    `cd ${q(opts.projectDir)} && exec ${q(opts.nodePath)} dist/sync.js --xbar-output`,
+    // --plugin lets a finished background sync refresh just this plugin.
+    `cd ${q(opts.projectDir)} && exec ${q(opts.nodePath)} dist/sync.js --xbar-output --plugin "$(basename "$0")"`,
     '',
   ].join('\n');
 }
