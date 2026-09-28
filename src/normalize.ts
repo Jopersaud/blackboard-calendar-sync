@@ -15,15 +15,26 @@ export interface Assignment {
 }
 
 /**
- * Turn a Blackboard course key into a short display code:
- * "CIS.473.M001.FALL2026" → "CIS 473", "MAT-295-M003" → "MAT 295".
- * Returns undefined when the key doesn't look like SUBJECT + NUMBER, in which
+ * Turn a Blackboard course key or name into a short display code:
+ * "CIS.473.M001.FALL2026" → "CIS 473", "MAT-295-M003" → "MAT 295",
+ * "CSE/ELE.400.MERGED.SPRING26.Intelligent Robotics" → "CSE/ELE 400".
+ * Returns undefined when it doesn't start with SUBJECT + NUMBER, in which
  * case events are titled with the assignment title alone.
  */
 export function shortCourseCode(courseKey: string | null | undefined): string | undefined {
   if (!courseKey) return undefined;
-  const m = /^([A-Za-z]{2,5})[.\s_-]?(\d{3,4}[A-Za-z]?)(?:\b|[.\s_-])/.exec(`${courseKey.trim()} `);
+  const m = /^([A-Za-z]{2,5}(?:\/[A-Za-z]{2,5})*)[.\s_-]?(\d{3,4}[A-Za-z]?)(?:\b|[.\s_-])/.exec(`${courseKey.trim()} `);
   return m ? `${m[1]!.toUpperCase()} ${m[2]!.toUpperCase()}` : undefined;
+}
+
+/**
+ * The human part of a Syracuse-style course name:
+ * "CSE.581.M001.FALL26.Intro D/Base Mngmt Syst." → "Intro D/Base Mngmt Syst.".
+ * Other names are returned unchanged.
+ */
+export function courseTitle(courseName: string): string {
+  const m = /^[A-Za-z/]{2,11}\.\d{3,4}[A-Za-z]?\.[A-Za-z0-9]+\.[A-Za-z]+\d{2,4}\.(.+)$/.exec(courseName.trim());
+  return (m?.[1] ?? courseName).trim();
 }
 
 export function courseCodeMap(courses: CourseList | undefined): Map<string, string> {
@@ -45,8 +56,10 @@ function toAssignment(item: UpcomingItem, codes: Map<string, string>): Assignmen
     title: item.title.trim(),
     dueAt: due.toISOString(),
   };
-  if (item.course_name) a.courseName = item.course_name.trim();
-  const code = codes.get(item.course_id);
+  if (item.course_name) a.courseName = courseTitle(item.course_name);
+  // Syracuse's course keys are numeric ("21058.1271"); the subject and
+  // number live in the course name instead, so fall back to that.
+  const code = codes.get(item.course_id) ?? shortCourseCode(item.course_name);
   if (code) a.courseCode = code;
   if (typeof item.points_possible === 'number') a.pointsPossible = item.points_possible;
   return a;

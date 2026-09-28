@@ -66,7 +66,7 @@ describe('buildEvents: 11:59 PM → all-day', () => {
 
   it('titles the event with the course code', () => {
     expect(ev.due.summary).toBe('[CIS 473] HW 3');
-    expect(ev.due.description).toContain('Course: Operating Systems');
+    expect(ev.due.description).toContain('Course: CIS 473 · Operating Systems');
     expect(ev.due.description).toContain('Points possible: 50');
     expect(ev.due.description).toContain('Auto-synced from Blackboard');
   });
@@ -135,6 +135,7 @@ describe('buildEvents: day-before reminder event', () => {
     const ev = buildEvents(noCode, config);
     expect(ev.due.summary).toBe('HW 3');
     expect(ev.reminder.summary).toBe('Due tomorrow: HW 3');
+    expect(ev.due.description).toContain('Course: Operating Systems\n');
   });
 });
 

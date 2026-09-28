@@ -155,7 +155,8 @@ function formatDueTime(instant: Date, timeZone: string): string {
 
 export function describe(a: Assignment, timeZone: string): string {
   const lines: string[] = [];
-  if (a.courseName) lines.push(`Course: ${a.courseName}`);
+  const course = [a.courseCode, a.courseName].filter(Boolean).join(' · ');
+  if (course) lines.push(`Course: ${course}`);
   lines.push(`Due: ${formatDueTime(new Date(a.dueAt), timeZone)}`);
   if (a.pointsPossible !== undefined) lines.push(`Points possible: ${a.pointsPossible}`);
   lines.push('', 'Auto-synced from Blackboard by blackboard-calendar-sync. Edits here are overwritten on the next sync.');

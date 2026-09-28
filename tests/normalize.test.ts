@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeUpcomingWork, shortCourseCode } from '../src/normalize.js';
+import { courseTitle, normalizeUpcomingWork, shortCourseCode } from '../src/normalize.js';
 import { coursesFixture, upcomingFixture } from './helpers.js';
 
 describe('shortCourseCode', () => {
@@ -8,11 +8,50 @@ describe('shortCourseCode', () => {
     ['MAT-295-M003', 'MAT 295'],
     ['PSY 205', 'PSY 205'],
     ['ecs102.m002', 'ECS 102'],
+    ['CSE.581.M001.FALL26.Intro D/Base Mngmt Syst.', 'CSE 581'],
+    ['CSE/ELE.400.MERGED.SPRING26.Intelligent Robotics', 'CSE/ELE 400'],
+    ['CIS341-Computer Organization', 'CIS 341'],
+    ['21058.1271', undefined],
+    ['1935.org', undefined],
+    ['MAT296CLASSTutoringResources', undefined],
     ['SANDBOX-ETHICS', undefined],
     ['', undefined],
     [null, undefined],
   ])('%s → %s', (key, expected) => {
     expect(shortCourseCode(key)).toBe(expected);
+  });
+});
+
+describe('courseTitle', () => {
+  it.each([
+    ['CSE.581.M001.FALL26.Intro D/Base Mngmt Syst.', 'Intro D/Base Mngmt Syst.'],
+    ['CSE/ELE.400.MERGED.SPRING26.Intelligent Robotics', 'Intelligent Robotics'],
+    ['CIS.351.MERGED.FALL24.Data Structures', 'Data Structures'],
+    ['CIS341-Computer Organization', 'CIS341-Computer Organization'],
+    ['Operating Systems', 'Operating Systems'],
+  ])('%s → %s', (name, expected) => {
+    expect(courseTitle(name)).toBe(expected);
+  });
+});
+
+describe('normalizeUpcomingWork: Syracuse data', () => {
+  it('takes the course code from the course name when the course key is numeric', () => {
+    const out = normalizeUpcomingWork(
+      {
+        items: [
+          {
+            ref: '_568501_1:_12987832_1',
+            course_id: '_568501_1',
+            course_name: 'CSE.581.M001.FALL26.Intro D/Base Mngmt Syst.',
+            title: 'Lab 07',
+            due_date: '2026-09-28T22:35:00.000Z',
+            points_possible: 100,
+          },
+        ],
+      },
+      { courses: [{ course_id: '_568501_1', name: 'CSE.581.M001.FALL26.Intro D/Base Mngmt Syst.', course_code: '21058.1271' }] },
+    );
+    expect(out[0]).toMatchObject({ courseCode: 'CSE 581', courseName: 'Intro D/Base Mngmt Syst.', title: 'Lab 07' });
   });
 });
 
@@ -48,6 +87,6 @@ describe('normalizeUpcomingWork', () => {
 
   it('works without a course list', () => {
     const out = normalizeUpcomingWork(upcomingFixture());
-    expect(out.every((a) => a.courseCode === undefined)).toBe(true);
+    expect(out.find((a) => a.title === 'HW 3')?.courseCode).toBeUndefined();
   });
 });
