@@ -1,0 +1,7 @@
+{
+  "count": 2,
+  "courses": [
+    { "course_id": "_26184_1", "name": "Operating Systems", "course_code": "CIS.473.M001.FALL2026" },
+    { "course_id": "_27001_1", "name": "Intro to Ethics", "course_code": "SANDBOX-ETHICS" }
+  ]
+}

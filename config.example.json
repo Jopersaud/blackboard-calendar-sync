@@ -1,0 +1,9 @@
+{
+  "blackboardMcpPath": "/Users/you/blackboard-mcp/dist/index.js",
+  "calendarName": "Blackboard",
+  "lookaheadDays": 30,
+  "reminderMinutesBefore": 1440,
+  "allDayReminderTime": "17:00",
+  "dueEventLeadMinutes": 30,
+  "includeRecentlyOverdue": true
+}

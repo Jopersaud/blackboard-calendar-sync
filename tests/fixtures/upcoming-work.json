@@ -1,0 +1,47 @@
+{
+  "window": { "from": "2026-09-28T16:00:00.000Z", "until": "2026-10-29T03:59:59.999Z", "days": 30 },
+  "count": 3,
+  "items": [
+    {
+      "ref": "_26184_1:_3010_1",
+      "course_id": "_26184_1",
+      "course_name": "Operating Systems",
+      "title": "HW 3",
+      "due_date": "2026-10-01T03:59:00.000Z",
+      "points_possible": 50,
+      "status": "not_submitted",
+      "category": "assignment"
+    },
+    {
+      "ref": "_26184_1:_3022_1",
+      "course_id": "_26184_1",
+      "course_name": "Operating Systems",
+      "title": "Quiz 2",
+      "due_date": "2026-10-02T22:35:00.000Z",
+      "status": "unknown",
+      "category": "test"
+    },
+    {
+      "ref": "_27001_1:reading-response-4",
+      "course_id": "_27001_1",
+      "course_name": "Intro to Ethics",
+      "title": "Reading Response 4",
+      "due_date": "2026-10-06T03:59:59.000Z",
+      "points_possible": 10,
+      "status": "submitted",
+      "category": "calendar-item"
+    }
+  ],
+  "recently_overdue": [
+    {
+      "ref": "_27001_1:_4100_1",
+      "course_id": "_27001_1",
+      "course_name": "Intro to Ethics",
+      "title": "Reading Response 3",
+      "due_date": "2026-09-27T03:59:00.000Z",
+      "status": "not_submitted",
+      "category": "assignment"
+    }
+  ],
+  "limitations": ["Only work posted in Blackboard is included."]
+}
